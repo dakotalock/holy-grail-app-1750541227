@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Persistent Message</title>
+    <!-- Tailwind CSS CDN for quick styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Basic custom styles or overrides if needed, though Tailwind should cover most */
+        body {
+            font-family: 'Inter', sans-serif; /* A modern, clean font */
+            background-color: #f3f4f6; /* Light gray background */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+        /* Focus styles for accessibility */
+        *:focus {
+            outline: 2px solid #3b82f6; /* Blue outline */
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root">
+        <!-- React app will be mounted here -->
+    </div>
+
+    <!-- React and ReactDOM CDNs -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <!-- Babel for JSX transformation in browser (for simplicity, typically done via build step) -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <script type="text/babel">
+        // Ensure React and ReactDOM are available globally from the CDNs
+        const { useState, useEffect, useCallback } = React;
+        const { createRoot } = ReactDOM;
+
+        // --- Configuration ---
+        // Base URL for the backend API.
+        // If deployed on Netlify, this typically points to the serverless function path.
+        // Example: `/.netlify/functions/message` where `message` is the name of your function file.
+        const API_BASE_URL = '/.netlify/functions/message';
+        const MESSAGE_ENDPOINT = `${API_BASE_URL}/api/message`; // Full endpoint for message operations
+
+        // --- Helper Components ---
+
+        /**
+         * MessageDisplay Component
+         * Displays the current persistent message.
+         * @param {object} props - The component props.
+         * @param {string} props.message - The message string to display.
+         */
+        function MessageDisplay({ message }) {
+            return (
+                <div className="bg-blue-50 p-6 rounded-lg shadow-inner text-center">
+                    <h2 className="text-xl font-semibold text-gray-700 mb-2">Current Message:</h2>
+                    <h1 className="text-3xl font-bold text-blue-700 break-words">{message || "No message loaded."}</h1>
+                </div>
+            );
+        }
+
+        /**
+         * MessageInput Component
+         * Provides an input field and a button to update the message.
+         * @param {object} props - The component props.
+         * @param {function} props.onUpdateMessage - Callback function to send the new message to the parent.
+         * @param {boolean} props.isLoading - Indicates if an update operation is in progress.
+         */
+        function MessageInput({ onUpdateMessage, isLoading }) {
+            const [inputValue, setInputValue] = useState('');
+
+            // Handle input change
+            const handleChange = (event) => {
+                setInputValue(event.target.value);
+            };
+
+            // Handle button click
+            const handleSubmit = () => {
+                if (inputValue.trim()) { // Ensure input is not empty
+                    onUpdateMessage(inputValue.trim());
+                    setInputValue(''); // Clear input after submission
+                }
+            };
+
+            // Handle Enter key press
+            const handleKeyPress = (event) => {
+                if (event.key === 'Enter') {
+                    handleSubmit();
+                }
+            };
+
+            return (
+                <div className="bg-white p-6 rounded-lg shadow-md">
+                    <h2 className="text-xl font-semibold text-gray-700 mb-4">Update Message:</h2>
+                    <label htmlFor="newMessageInput" className="sr-only">New Message</label>
+                    <input
+                        id="newMessageInput"
+                        type="text"
+                        value={inputValue}
+                        onChange={handleChange}
+                        onKeyPress={handleKeyPress}
+                        placeholder="Type your new message here..."
+                        className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-all duration-200"
+                        aria-label="New message input field"
+                        disabled={isLoading}
+                    />
+                    <button
+                        onClick={handleSubmit}
+                        className="w-full bg-blue-600 text-white py-3 px-6 rounded-md font-semibold hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-offset-2 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+                        disabled={isLoading || !inputValue.trim()}
+                        aria-live="polite"
+                    >
+                        {isLoading ? 'Updating...' : 'Update Message'}
+                    </button>
+                </div>
+            );
+        }
+
+        // --- Main App Component ---
+
+        /**
+         * App Component
+         * Root component managing the overall application state and data flow.
+         * Handles fetching and updating the persistent message.
+         */
+        function App() {
+            const [message, setMessage] = useState('');
+            const [loading, setLoading] = useState(true);
+            const [error, setError] = useState(null);
+            const [isUpdating, setIsUpdating] = useState(false); // State for update operation
+
+            /**
+             * Fetches the current message from the backend API.
+             * Utilizes useCallback to memoize the function, preventing unnecessary re-creations.
+             */
+            const fetchMessage = useCallback(async () => {
+                setLoading(true);
+                setError(null); // Clear previous errors
+                try {
+                    const response = await fetch(MESSAGE_ENDPOINT, {
+                        method: 'GET',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    setMessage(data.message);
+                } catch (err) {
+                    console.error("Failed to fetch message:", err);
+                    setError(`Failed to load message: ${err.message}`);
+                } finally {
+                    setLoading(false);
+                }
+            }, []); // Empty dependency array means this function is created once
+
+            /**
+             * Handles updating the message via a POST request to the backend.
+             * @param {string} newMessage - The new message content to send.
+             */
+            const handleUpdateMessage = useCallback(async (newMessage) => {
+                setIsUpdating(true); // Indicate that an update is in progress
+                setError(null); // Clear previous errors
+                try {
+                    const response = await fetch(MESSAGE_ENDPOINT, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({ newMessage }),
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! Status: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+                    // Option 2 from spec: Update state directly from POST response
+                    setMessage(data.updatedMessage);
+                    console.log("Message updated successfully:", data.updatedMessage);
+                } catch (err) {
+                    console.error("Failed to update message:", err);
+                    setError(`Failed to update message: ${err.message}`);
+                } finally {
+                    setIsUpdating(false); // Update operation finished
+                }
+            }, []); // Empty dependency array means this function is created once
+
+            // Effect hook to fetch message on component mount
+            useEffect(() => {
+                fetchMessage();
+            }, [fetchMessage]); // Dependency on fetchMessage to ensure effect runs if fetchMessage changes (though useCallback makes it stable)
+
+            return (
+                <div className="container mx-auto p-4 max-w-lg bg-gray-100 rounded-xl shadow-2xl space-y-6 border border-gray-200">
+                    <h1 className="text-4xl font-extrabold text-center text-gray-900 mb-6">
+                        Simple Persistent Message
+                    </h1>
+
+                    {/* Display Loading, Error, or Message */}
+                    {loading ? (
+                        <p className="text-center text-gray-600 text-lg">Loading message...</p>
+                    ) : error ? (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded relative" role="alert">
+                            <strong className="font-bold">Error!</strong>
+                            <span className="block sm:inline ml-2">{error}</span>
+                            <button
+                                onClick={fetchMessage}
+                                className="ml-4 text-sm underline hover:text-red-900"
+                                aria-label="Retry loading message"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    ) : (
+                        <MessageDisplay message={message} />
+                    )}
+
+                    {/* Input for updating message */}
+                    <MessageInput onUpdateMessage={handleUpdateMessage} isLoading={isUpdating} />
+
+                    {/* Optional: Status message for updates */}
+                    {isUpdating && !error && (
+                        <p className="text-center text-blue-600 text-sm mt-2" aria-live="polite">
+                            Sending update...
+                        </p>
+                    )}
+                </div>
+            );
+        }
+
+        // --- Render the App ---
+        // Get the root DOM element
+        const container = document.getElementById('root');
+        // Create a root and render the App component
+        const root = createRoot(container);
+        root.render(<App />);
+    </script>
+
+    <div style="position:fixed;bottom:10px;right:10px;background:rgba(0,0,0,0.7);color:white;padding:5px 10px;border-radius:5px;font-family:sans-serif;font-size:12px">
+        Created by Dakota Rain Lock, powered by Holy Grail. A Dakota Rain Lock Invention.
+    </div>
+    
+</body>
+</html>
